@@ -1,5 +1,9 @@
--- [author] Gabriel Nicolas Avellaneda <avellaneda.gabriel@gmail.com>
-local boundary = require('boundary')
+-- Copyright 2015 Boundary
+-- Gabriel Nicolas Avellaneda <avellaneda.gabriel@gmail.com>
+-- @brief convenience variables and functions for Lua scripts
+-- @file boundary.lua
+local fs = require('fs')
+local json = require('json')
 local Emitter = require('core').Emitter
 local Error = require('core').Error
 local Object = require('core').Object
@@ -12,13 +16,119 @@ local io = require('io')
 local http = require('http')
 local table = require('table')
 local net = require('net')
-
+local json = require('json')
 local framework = {}
+local params = {}
+
+-- import param.json data into a Lua table (boundary.param)
+local json_blob
+if (pcall(function () json_blob = fs.readFileSync("param.json") end)) then
+  pcall(function () params = json.parse(json_blob) end)
+else
+	print('param.json not found!')
+end
+
+framework.params = params
+
 
 framework.string = {}
 framework.functional = {}
 framework.table = {}
 framework.util = {}
+framework.http = {}
+
+function framework.http.get(options, data, callback, dataType, debug)
+	local headers = {}
+	if type(options.headers) == 'table' then
+		headers = options.headers
+	end
+
+	if dataType == 'json' then
+		headers['Accept'] = 'application/json'
+	end
+	
+	local reqOptions = {
+		host = options.host,
+		port = options.port,
+		path = options.path,
+		headers = headers
+	}
+
+	local req = http.request(reqOptions, function (res) 
+
+
+		local response = ''
+		res:on('end', function ()
+			if dataType == 'json' then
+				response = json.parse(response)	
+			end
+
+			if callback then callback(response) end
+		end)
+
+		res:on('data', function (chunk) 
+			if debug then
+				print(chunk)
+			end
+			response = response .. framework.string.trim(chunk)
+		end)
+
+		-- Propagate errors
+		res:on('error', function (err)  req:emit('error', err.message) end)
+	end)
+
+	if data ~= nil then
+		req:write(data)
+	end
+	req:done()
+
+	return req
+end
+
+function framework.http.post(options, data, callback, dataType)
+	local headers = {} 
+	if type(options.headers) == 'table' then
+		headers = options.headers
+	end
+
+	if dataType == 'json' then
+		headers['Content-Type'] = 'application/json'
+		headers['Content-Length'] = #data 
+		headers['Accept'] = 'application/json'
+	end
+
+	local reqOptions = {
+		host = options.host,
+		port = options.port,
+		path = options.path,
+		method = 'POST',
+		headers = headers
+	}
+
+	local req = http.request(reqOptions, function (res) 
+	
+		local response = ''
+		res:on('end', function () 
+			if dataType == 'json' then
+				response = json.parse(response)	
+			end
+
+			if callback then callback(response) end	
+		end)
+
+		res:on('data', function (chunk) 
+			
+			response = response .. chunk
+		end) 
+
+		res:on('error', function (err)  req:emit('error', err.message) end)
+	end)
+
+	req:write(data)
+	req:done()
+
+	return req
+end
 
 function framework.util.megaBytesToBytes(mb)
 	return mb * 1024 * 1024
@@ -37,6 +147,10 @@ function framework.functional.compose(f, g)
 end
 
 function framework.table.get(key, map)
+	if type(map) ~= 'table' then
+		return nil 
+	end
+
 	return map[key]
 end
 
@@ -123,6 +237,13 @@ exportable(framework.string)
 exportable(framework.util)
 exportable(framework.functional)
 exportable(framework.table)
+exportable(framework.http)
+
+function Emitter:propagate(eventName, target)
+	if target.emit then
+		self:on(eventName, function (...) target:emit(eventName, ...) end)
+	end
+end
 
 local DataSource = Emitter:extend()
 framework.DataSource = DataSource
@@ -168,8 +289,6 @@ framework.NetDataSource = NetDataSource
 
 local Plugin = Emitter:extend()
 framework.Plugin = Plugin
-
-framework.boundary = boundary
 
 function Plugin:poll()
 	
@@ -218,16 +337,16 @@ function Plugin:initialize(params, dataSource)
 end
 
 function Plugin:onPoll()
-	self.dataSource:fetch(self, function (data) self:parseValues(data) end )	
+	self.dataSource:fetch(self, function (...) self:parseValues(...) end )	
 end
 
-function Plugin:parseValues(data)
-	local metrics = self:onParseValues(data)
+function Plugin:parseValues(...)
+	local metrics = self:onParseValues(...)
 
 	self:report(metrics)
 end
 
-function Plugin:onParseValues(data)
+function Plugin:onParseValues(...)
 	p('Plugin:onParseValues')
 	return {}	
 end
@@ -285,8 +404,12 @@ function HttpPlugin:initialize(params)
 end
 
 function Plugin:error(err)
-	local msg = tostring(err)
-
+	local msg = ''
+	if type(err) == 'table' then
+		msg = err.message
+	else
+		msg = tostring(err)
+	end
 	print(msg)
 end
 

@@ -1,11 +1,13 @@
-local framework = require('framework/framework.lua')
+local framework = require('framework')
 local Plugin = framework.Plugin
 local DataSource = framework.DataSource
 local math = require('math')
+local params = framework.params
 
-local params = framework.boundary.param
 params.name = 'LUA demo plugin'
 params.version = '1.0'
+params.minValue = params.minValue or 1
+params.maxValue = params.maxValue or 100
 
 local RandomDataSource = DataSource:extend()
 
