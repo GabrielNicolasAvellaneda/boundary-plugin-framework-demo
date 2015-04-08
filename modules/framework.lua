@@ -1,7 +1,15 @@
--- Copyright 2015 Boundary
--- Gabriel Nicolas Avellaneda <avellaneda.gabriel@gmail.com>
--- @brief convenience variables and functions for Lua scripts
--- @file boundary.lua
+---------------
+---- ## A Boundary Plugin Framework for Luvit.
+----
+---- For easy development of custom Boundary.com plugins.
+----
+---- [Github Page](https://github.com/GabrielNicolasAvellaneda/boundary-plugin-framework-lua)
+----
+---- @author Gabriel Nicolas Avellaneda <avellaneda.gabriel@gmail.com>
+---- @copyright 2015
+---- @license MIT
+----
+---------------
 local fs = require('fs')
 local json = require('json')
 local Emitter = require('core').Emitter
@@ -290,14 +298,18 @@ framework.NetDataSource = NetDataSource
 local Plugin = Emitter:extend()
 framework.Plugin = Plugin
 
-function Plugin:poll()
-	
+function Plugin:_poll()
+
 	self:emit('before_poll')
 	
 	self:onPoll()
 
 	self:emit('after_poll')
-	timer.setTimeout(self.pollInterval, function () self.poll(self) end)
+	timer.setTimeout(self.pollInterval, function () self:_poll() end)
+end
+
+function Plugin:run()
+	self:_poll()	
 end
 
 function Plugin:report(metrics)
@@ -413,6 +425,10 @@ function Plugin:error(err)
 	print(msg)
 end
 
+local PollingPlugin = Plugin:extend()
+
+framework.PollingPlugin = PollingPlugin
+
 function HttpPlugin:makeRequest(reqOptions, successCallback)
 	local req = http.request(reqOptions, function (res)
 
@@ -484,4 +500,57 @@ end
 
 framework.Accumulator = Accumulator
 
+local DataSourcePoller = Emitter:extend() 
+
+--- DataSourcePoller constructor.
+-- DataSourcePoller Polls a DataSource at the specified interval and calls a callback when there is some data available. 
+-- @int pollInterval number of milliseconds to poll for data 
+-- @param dataSource A DataSource to be polled
+function DataSourcePoller:initialize(pollInterval, dataSource)
+	self.pollInterval = pollInterval
+	self.dataSource = dataSource
+end
+
+function DataSourcePoller:_poll(callback)
+	self.dataSource:fetch(self, callback)
+
+	timer.setTimeout(self.pollInterval, function () self:_poll(callback) end)
+end
+
+--- Start polling for data.
+-- @param callback A callback function to call when the DataSource returns some data. 
+function DataSourcePoller:run(callback)
+	self:_poll(callback)
+end
+
+
+local RandomDataSource = DataSource:extend()
+
+--- RandomDataSource constructor
+-- @int minValue the lower bounds for the random number generation.
+-- @int maxValue the upper bound for the random number generation.
+--@usage local ds = RandomDataSource:new(1, 100)
+function RandomDataSource:initialize(minValue, maxValue)
+	self.minValue = minValue
+	self.maxValue = maxValue
+end
+
+--- Returns a random number
+-- @param context the object that called the fetch
+-- @param callback A callback to call with the random generated number
+-- @usage local ds = RandomDataSource:new(1, 100) -- Generate numbers from 1 to 100
+--ds.fetch(nil, print)
+function RandomDataSource:fetch(context, callback)
+	
+	local value = math.random(self.minValue, self.maxValue)
+	if not callback then error('fetch: you must set a callback when calling fetch') end
+
+	callback(value)
+end
+
+framework.RandomDataSource = RandomDataSource
+framework.DataSourcePoller = DataSourcePoller
+
 return framework
+
+
